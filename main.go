@@ -19,21 +19,23 @@ func main() {
 	pgDSN := getenv("PG_DSN", "postgres://user:pass@localhost:5432/rag?sslmode=disable")
 	rerankBaseURL := getenv("RERANK_BASE_URL", "http://localhost:8001")
 	rerankModel := getenv("RERANK_MODEL", "bge-reranker")
+	token := getenv("OLLAMA_BEARER_TOKEN", "xxxxx")
 
 	embedder := embedding.New(
-		embedding.NewVLLMProvider(embeddingBaseURL),
+		embedding.NewVLLMProvider(embeddingBaseURL, embedding.WithHeader("Authorization", "Bearer "+token)),
 		embedding.WithModel(embeddingModel),
 		embedding.WithBatchSize(32),
 		embedding.WithConcurrency(4),
 	)
 
+	fmt.Println("pg_dsn", pgDSN)
 	store, err := vector.NewPGVector(pgDSN)
 	if err != nil {
 		panic(err)
 	}
 	defer store.Close()
 
-	reranker := rerank.New(rerankBaseURL, rerankModel)
+	reranker := rerank.New(rerankBaseURL, rerankModel, rerank.WithHeader("Authorization", "Bearer "+token))
 
 	indexer := &pipeline.Indexer{
 		Embedder: embedder,

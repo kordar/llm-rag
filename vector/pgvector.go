@@ -92,8 +92,12 @@ LIMIT %d
 	var hits []SearchHit
 	for rows.Next() {
 		var h SearchHit
-		if err := rows.Scan(&h.ID, &h.Content, &h.Metadata, &h.Distance); err != nil {
+		var metadata []byte
+		if err := rows.Scan(&h.ID, &h.Content, &metadata, &h.Distance); err != nil {
 			return nil, err
+		}
+		if len(metadata) > 0 {
+			h.Metadata = append(json.RawMessage(nil), metadata...)
 		}
 		hits = append(hits, h)
 	}
