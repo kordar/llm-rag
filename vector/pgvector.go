@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/kordar/llm-rag/model"
 	"github.com/pgvector/pgvector-go"
@@ -27,10 +28,15 @@ type SearchHit struct {
 }
 
 type PGVector struct {
-	db *sql.DB
+	db    *sql.DB
+	table string
 }
 
 func NewPGVector(dsn string) (*PGVector, error) {
+	return NewPGVectorWithTable(dsn, "documents")
+}
+
+func NewPGVectorWithTable(dsn string, table string) (*PGVector, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, err
@@ -39,7 +45,18 @@ func NewPGVector(dsn string) (*PGVector, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &PGVector{db: db}, nil
+	table = strings.TrimSpace(table)
+	if table == "" {
+		table = "documents"
+	}
+	if !isSafeIdentifier(table) {
+		_ = db.Close()
+		return nil, fmt.Errorf("vector: invalid table name: %s", table)
+	}
+	return &PGVector{
+		db:    db,
+		table: table,
+	}, nil
 }
 
 func (p *PGVector) Close() error {
@@ -53,10 +70,10 @@ func (p *PGVector) Insert(ctx context.Context, doc model.Document) error {
 	if p == nil || p.db == nil {
 		return errors.New("vector: nil db")
 	}
-	query := `
-INSERT INTO documents (id, content, embedding, metadata)
+	query := fmt.Sprintf(`
+INSERT INTO %s (id, content, embedding, metadata)
 VALUES ($1, $2, $3, $4)
-`
+`, p.table)
 	_, err := p.db.ExecContext(
 		ctx,
 		query,
@@ -78,10 +95,10 @@ func (p *PGVector) Search(ctx context.Context, embedding []float32, topK int) ([
 
 	query := fmt.Sprintf(`
 SELECT id, content, metadata, embedding <-> $1 AS distance
-FROM documents
+FROM %s
 ORDER BY embedding <-> $1
 LIMIT %d
-`, topK)
+`, p.table, topK)
 
 	rows, err := p.db.QueryContext(ctx, query, pgvector.NewVector(embedding))
 	if err != nil {
@@ -112,4 +129,23 @@ func nullableJSON(b []byte) interface{} {
 		return nil
 	}
 	return json.RawMessage(b)
+}
+
+func isSafeIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if i == 0 {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' {
+				continue
+			}
+			return false
+		}
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
